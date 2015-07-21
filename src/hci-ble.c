@@ -319,7 +319,7 @@ int main(int argc, const char* argv[])
         hci_le_set_advertise_enable(hciSocket, 0, 1000);
       } else if (SIGUSR2 == lastSignal) {
         // TODO: make id unique ?
-	hci_signal_le_con_param_update_req(hciSocket, htobs(0x0C8), htobs(0x0960),htobs(0x0007), htobs(0x0C80), htobs(0x0AAA));
+	hci_signal_le_con_param_update_req(hciSocket, htobs(0x0258), htobs(0x0320),htobs(0x0000), htobs(0x0258), htobs(0x0002));
       } else if (SIGUSR1 == lastSignal) {
         // stop advertising
         hci_le_set_advertise_enable(hciSocket, 0, 1000);
