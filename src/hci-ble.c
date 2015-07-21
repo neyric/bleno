@@ -18,6 +18,104 @@ static void signalHandler(int signal) {
   lastSignal = signal;
 }
 
+struct hci_acl_hdr {
+	uint16_t handle;
+	uint16_t len;
+};
+
+struct signal_hdr {
+	uint16_t len;
+	uint16_t cid;
+};
+
+struct signal_payload_hdr {
+	uint8_t  code;
+	uint8_t  id;
+	uint16_t len;
+};
+
+struct le_con_param_update_req {
+	uint16_t interval_min;
+	uint16_t interval_max;
+	uint16_t slave_latency;
+	uint16_t timeout_multiplier;
+};
+
+
+int hci_send_acl_data(int dd, uint16_t handle, uint8_t dlen, struct signal_hdr *sh, struct signal_payload_hdr *plh, void *pl)
+{
+	uint8_t type = HCI_ACLDATA_PKT;
+        hci_acl_hdr ha;
+	struct iovec iv[5];
+	int ivn;
+
+	ha.handle = handle & 0xFFF0; // Zero out the PB (packet boundary is host-to-controller) and BC (broadcast is point-to-point)
+	ha.dlen = dlen;
+
+	iv[0].iov_base = &type;
+	iv[0].iov_len = 1;
+	iv[1].iov_base = &ha;
+	iv[1].iov_len = HCI_ACL_HDR_SIZE;
+	ivn = 2;
+
+	printf("\nACL Packet details[handle:%x, length:%d]\n", ha.handle, ha.dlen);
+
+	if (dlen) {
+		iv[2].iov_base = sh;
+		iv[2].iov_len = 4; //HCI_SIGNAL_HDR_SIZE;
+		ivn = 3;
+		printf("\nACL signal command details[length:%d, cid:%d]\n", sh->len, sh->cid);
+		if(sh->len > 0) {
+			iv[3].iov_base = plh;
+			iv[3].iov_len = 4; //HCI_SIGNAL_PAYLOAD_HDR_SIZE;
+			ivn = 4;
+			if(plh->len > 0) {
+				iv[4].iov_base = pl;
+				iv[4].iov_len = plh->len;
+				ivn = 5;
+			}
+		}
+	}
+
+	while (writev(dd, iv, ivn) < 0) {
+		if (errno == EAGAIN || errno == EINTR)
+			continue;
+		return -1;
+	}
+	return 0;
+}
+
+int hci_signal_le_con_param_update_req(int dd, uint16_t interval_min, uint16_t interval_max, uint16_t slave_latency, uint16_t timeout_multiplier, uint16_t id)
+{
+	struct signal_hdr sh;
+	struct signal_payload_hdr pl;
+	struct le_con_param_update_req ur;
+
+	uint16_t handle = 0x0040;
+	uint16_t length = 0x0010;
+
+	memset(&sh, 0, sizeof(sh));
+	memset(&pl, 0, sizeof(pl));
+	memset(&ur, 0, sizeof(ur));
+
+	sh.len = 0x000C; //HCI_SIGNAL_CON_PARAM_UPDATE_REQ_SIZE; //12 or 0x000C
+	sh.cid = 0x0005; //LE_CHANNEL; //5 or 0x0005
+
+	pl.code = 0x12; //LE_CON_PARAM_UPDATE_REQ_CODE
+	pl.id = id;//0x77; // Need to randomize? Sequential?
+	pl.len = 0x0008; // LE_CON_PARAM_UPDATE_LEN
+
+	ur.interval_min = interval_min;
+	ur.interval_max = interval_max;
+	ur.slave_latency = slave_latency;
+	ur.timeout_multiplier = timeout_multiplier;
+
+        if (hci_send_acl_data(dd, handle, length, &sh, &pl, &ur) < 0)
+		return -1;
+
+        return 0;
+}
+
 int hci_le_set_advertising_data(int dd, uint8_t* data, uint8_t length, int to)
 {
   struct hci_request rq;
@@ -144,6 +242,7 @@ int main(int argc, const char* argv[])
   signal(SIGKILL, signalHandler);
   signal(SIGHUP, signalHandler);
   signal(SIGUSR1, signalHandler);
+  signal(SIGUSR2, signalHandler);
 
   prctl(PR_SET_PDEATHSIG, SIGKILL);
 
@@ -218,6 +317,9 @@ int main(int argc, const char* argv[])
       } else if (SIGHUP == lastSignal) {
         // stop advertising
         hci_le_set_advertise_enable(hciSocket, 0, 1000);
+      } else if (SIGUSR2 == lastSignal) {
+        // TODO: make id unique ?
+	hci_signal_le_con_param_update_req(hciSocket, htobs(0x0C8), htobs(0x0960),htobs(0x0007), htobs(0x0C80), htobs(0x0AAA));
       } else if (SIGUSR1 == lastSignal) {
         // stop advertising
         hci_le_set_advertise_enable(hciSocket, 0, 1000);
